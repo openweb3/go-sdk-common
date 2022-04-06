@@ -16,7 +16,11 @@ type RpcTestConfig struct {
 	Client      interface{}
 
 	Rpc2Func         map[string]string
-	Rpc2FuncSelector map[string]func(params []interface{}) (string, []interface{})
-	IgnoreRpcs       map[string]bool
-	OnlyTestRpcs     map[string]bool
+	Rpc2FuncSelector map[string]func(params []interface{}) (realFuncName string, realParams []interface{})
+	// convert sdk rpc result back to pre-unmarshal for comparing with example result, becasue sdk may change result type for user convinent, such as web3go
+	Rpc2FuncResultHandler map[string]func(result interface{}) (handlerdResult interface{})
+	// ignoreRpc priority is higher than onlyTestRpc
+	IgnoreRpcs map[string]bool
+	// onlyTestRpc priority is lower than ignoreRpc
+	OnlyTestRpcs map[string]bool
 }
