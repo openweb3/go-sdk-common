@@ -12,11 +12,11 @@ type MockRPC struct {
 }
 
 type RpcTestConfig struct {
-	examplesUrl string
-	client      interface{}
+	ExamplesUrl string
+	Client      interface{}
 
-	rpc2Func         map[string]string
-	rpc2FuncSelector map[string]func(params []interface{}) (string, []interface{})
-	ignoreRpc        map[string]bool
-	onlyTestRpc      map[string]bool
+	Rpc2Func         map[string]string
+	Rpc2FuncSelector map[string]func(params []interface{}) (string, []interface{})
+	IgnoreRpcs       map[string]bool
+	OnlyTestRpcs     map[string]bool
 }

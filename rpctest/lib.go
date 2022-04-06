@@ -18,11 +18,11 @@ import (
 //   json marshal then amd compare
 func DoClientTest(t *testing.T, config RpcTestConfig) {
 
-	rpc2Func, rpc2FuncSelector, ignoreRpc, onlyTestRpc := config.rpc2Func, config.rpc2FuncSelector, config.ignoreRpc, config.onlyTestRpc
+	rpc2Func, rpc2FuncSelector, ignoreRpc, onlyTestRpc := config.Rpc2Func, config.Rpc2FuncSelector, config.IgnoreRpcs, config.OnlyTestRpcs
 
 	// read json config
 	httpClient := &http.Client{}
-	resp, err := httpClient.Get(config.examplesUrl)
+	resp, err := httpClient.Get(config.ExamplesUrl)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func DoClientTest(t *testing.T, config RpcTestConfig) {
 
 			fmt.Printf("\n========== %s %v ==========\n", rpcName, jsonMarshalAndOrdered(params))
 			// reflect call sdkFunc
-			rpcReuslt, rpcError, err := reflectCall(config.client, sdkFunc, params)
+			rpcReuslt, rpcError, err := reflectCall(config.Client, sdkFunc, params)
 			if err != nil {
 				t.Fatal(err)
 				continue
