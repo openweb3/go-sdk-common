@@ -1,5 +1,7 @@
 package rpctest
 
+type ConvertParamError error
+
 type MockRPC struct {
 	Version  string `json:"version"`
 	Examples map[string][]struct {
@@ -20,7 +22,8 @@ type RpcTestConfig struct {
 	// convert sdk rpc result back to pre-unmarshal for comparing with example result, becasue sdk may change result type for user convinent, such as web3go
 	Rpc2FuncResultHandler map[string]func(result interface{}) (handlerdResult interface{})
 	// ignoreRpc priority is higher than onlyTestRpc
-	IgnoreRpcs map[string]bool
+	IgnoreRpcs     map[string]bool
+	IgnoreExamples map[string]bool
 	// onlyTestRpc priority is lower than ignoreRpc
 	OnlyTestRpcs map[string]bool
 }

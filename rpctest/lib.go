@@ -18,7 +18,8 @@ import (
 //   json marshal then amd compare
 func DoClientTest(t *testing.T, config RpcTestConfig) {
 
-	rpc2Func, rpc2FuncSelector, rpc2FuncResultHandler, ignoreRpc, onlyTestRpc := config.Rpc2Func, config.Rpc2FuncSelector, config.Rpc2FuncResultHandler, config.IgnoreRpcs, config.OnlyTestRpcs
+	rpc2Func, rpc2FuncSelector, rpc2FuncResultHandler := config.Rpc2Func, config.Rpc2FuncSelector, config.Rpc2FuncResultHandler
+	ignoreRpc, ignoreExamples, onlyTestRpc := config.IgnoreRpcs, config.IgnoreExamples, config.OnlyTestRpcs
 
 	// read json config
 	httpClient := &http.Client{}
@@ -47,6 +48,10 @@ func DoClientTest(t *testing.T, config RpcTestConfig) {
 
 		for _, subExamp := range subExamps {
 
+			if ignoreExamples[subExamp.Name] {
+				continue
+			}
+
 			var sdkFunc string
 			var params []interface{}
 
@@ -60,23 +65,31 @@ func DoClientTest(t *testing.T, config RpcTestConfig) {
 
 			if sdkFunc == "" {
 				t.Fatalf("no sdk func for rpc:%s", rpcName)
-				continue
 			}
 
-			fmt.Printf("\n========== %s %v ==========\n", rpcName, jsonMarshalAndOrdered(params))
+			fmt.Printf("\n========== example: %v === rpc: %s === params: %v ==========\n", subExamp.Name, rpcName, jsonMarshalAndOrdered(params))
 			// reflect call sdkFunc
 			rpcReuslt, rpcError, err := reflectCall(config.Client, sdkFunc, params)
 			if err != nil {
+				var tmp interface{} = err
+				switch tmp.(type) {
+				case ConvertParamError:
+					if subExamp.Error != nil {
+						continue
+					}
+				}
 				t.Fatal(err)
-				continue
 			}
 
 			if sdkFuncResultHandler, ok := rpc2FuncResultHandler[rpcName]; ok {
 				rpcReuslt = sdkFuncResultHandler(rpcReuslt)
 			}
 
+			if subExamp.Error != nil || rpcError != nil {
+				assert.Equal(t, jsonMarshalAndOrdered(subExamp.Error), jsonMarshalAndOrdered(rpcError))
+				continue
+			}
 			assert.Equal(t, jsonMarshalAndOrdered(subExamp.Result), jsonMarshalAndOrdered(rpcReuslt))
-			assert.Equal(t, jsonMarshalAndOrdered(subExamp.Error), jsonMarshalAndOrdered(rpcError))
 		}
 	}
 }
@@ -97,12 +110,22 @@ func reflectCall(c interface{}, sdkFunc string, params []interface{}) (resp inte
 			}
 
 			vPtr := reflect.New(pType).Interface()
-			vPtr = convertType(param, vPtr)
+			vPtr, err = convertType(param, vPtr)
+			if err != nil {
+				return nil, nil, ConvertParamError(err)
+			}
 			v := reflect.ValueOf(vPtr).Elem().Interface()
 			in[i+1] = reflect.ValueOf(v)
 		}
 		out := method.Func.Call(in)
-		fmt.Printf("func %v, params %v, resp type %T, respError type %T, out %v\n", sdkFunc, jsonMarshalAndOrdered(getReflectValuesInterfaces(in[1:])), out[0].Interface(), out[1].Interface(), jsonMarshalAndOrdered(getReflectValuesInterfaces(out)))
+		fmt.Printf("func name: %v, \nparams: %v, \nresp type: %T, respError type: %T, \nresp value: %v, \nrespError value: %v\n",
+			sdkFunc,
+			jsonMarshalAndOrdered(getReflectValuesInterfaces(in[1:])),
+			out[0].Interface(),
+			out[1].Interface(),
+			jsonMarshalAndOrdered(out[0].Interface(), true),
+			jsonMarshalAndOrdered(out[1].Interface(), true),
+		)
 		return out[0].Interface(), out[1].Interface(), nil
 	}
 	return nil, nil, errors.Errorf("not found method %v", sdkFunc)
@@ -118,17 +141,17 @@ func getReflectValuesInterfaces(values []reflect.Value) []interface{} {
 
 // cfx_getBlockByEpochNumber  GetBlockSummaryByEpoch 0x0, false
 // rpc_name => func(params) sdkFuncName sdkFuncParams
-func convertType(from interface{}, to interface{}) interface{} {
+func convertType(from interface{}, to interface{}) (interface{}, error) {
 	jp, err := json.Marshal(from)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	err = json.Unmarshal(jp, &to)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return to
+	return to, nil
 }
 
 func orderJson(j []byte, indent ...bool) []byte {
