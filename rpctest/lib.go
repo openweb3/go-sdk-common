@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/pkg/errors"
@@ -30,7 +31,11 @@ func DoClientTest(t *testing.T, config RpcTestConfig) {
 	source := resp.Body
 	defer resp.Body.Close()
 
-	b, _ := ioutil.ReadAll(source)
+	b, err := ioutil.ReadAll(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	m := &MockRPC{}
 	err = json.Unmarshal(b, m)
 	if err != nil {
@@ -67,7 +72,7 @@ func DoClientTest(t *testing.T, config RpcTestConfig) {
 				t.Fatalf("no sdk func for rpc:%s", rpcName)
 			}
 
-			fmt.Printf("\n========== example: %v === rpc: %s === params: %v ==========\n", subExamp.Name, rpcName, jsonMarshalAndOrdered(params))
+			fmt.Printf("\n========== example: %v === rpc: %s === params: %s ==========\n", subExamp.Name, rpcName, mustJsonMarshalForTest(params))
 			// reflect call sdkFunc
 			rpcReuslt, rpcError, err := reflectCall(config.Client, sdkFunc, params)
 			if err != nil {
@@ -86,10 +91,10 @@ func DoClientTest(t *testing.T, config RpcTestConfig) {
 			}
 
 			if subExamp.Error != nil || rpcError != nil {
-				assert.Equal(t, jsonMarshalAndOrdered(subExamp.Error), jsonMarshalAndOrdered(rpcError))
+				assert.Equal(t, mustJsonMarshalForTest(subExamp.Error), mustJsonMarshalForTest(rpcError))
 				continue
 			}
-			assert.Equal(t, jsonMarshalAndOrdered(subExamp.Result), jsonMarshalAndOrdered(rpcReuslt))
+			assert.Equal(t, mustJsonMarshalForTest(subExamp.Result), mustJsonMarshalForTest(rpcReuslt))
 		}
 	}
 }
@@ -120,11 +125,11 @@ func reflectCall(c interface{}, sdkFunc string, params []interface{}) (resp inte
 		out := method.Func.Call(in)
 		fmt.Printf("func name: %v, \nparams: %v, \nresp type: %T, respError type: %T, \nresp value: %v, \nrespError value: %v\n",
 			sdkFunc,
-			jsonMarshalAndOrdered(getReflectValuesInterfaces(in[1:])),
+			mustJsonMarshalForTest(getReflectValuesInterfaces(in[1:])),
 			out[0].Interface(),
 			out[1].Interface(),
-			jsonMarshalAndOrdered(out[0].Interface(), true),
-			jsonMarshalAndOrdered(out[1].Interface(), true),
+			mustJsonMarshalForTest(out[0].Interface(), true),
+			mustJsonMarshalForTest(out[1].Interface(), true),
 		)
 		return out[0].Interface(), out[1].Interface(), nil
 	}
@@ -154,37 +159,88 @@ func convertType(from interface{}, to interface{}) (interface{}, error) {
 	return to, nil
 }
 
-func orderJson(j []byte, indent ...bool) []byte {
-	var r interface{}
-	err := json.Unmarshal(j, &r)
+func mustJsonMarshalForTest(v interface{}, indent ...bool) string {
+	j, err := jsonMarshalForTest(v, indent...)
 	if err != nil {
 		panic(err)
 	}
-
-	isIndent := false
-	if len(indent) > 0 {
-		isIndent = indent[0]
-	}
-
-	if isIndent {
-		j, err = json.MarshalIndent(r, "", "  ")
-	} else {
-		j, err = json.Marshal(r)
-	}
-
-	if err != nil {
-		panic(err)
-	}
-
-	return j
+	return string(j)
 }
 
-func jsonMarshalAndOrdered(v interface{}, indent ...bool) string {
+// handle struct field by 'testomit' tag and order json
+func jsonMarshalForTest(v interface{}, indent ...bool) ([]byte, error) {
+	fmt.Printf("reflect.ValueOf(v).Kind(): %v\n", reflect.ValueOf(v).Kind())
 
-	j, err := json.Marshal(v)
-	if err != nil {
-		panic(err)
+	reflectV := reflect.ValueOf(v)
+
+	if reflectV.Kind() != reflect.Ptr && reflectV.Kind() != reflect.Struct {
+		return json.Marshal(v)
 	}
 
-	return string(orderJson(j, indent...))
+	if reflectV.Kind() == reflect.Ptr && reflectV.Elem().Kind() != reflect.Struct {
+		fmt.Printf("reflect.ValueOf(v).Elem().Kind(): %v\n", reflectV.Elem().Kind())
+		return json.Marshal(v)
+	}
+
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	m := map[string]interface{}{}
+
+	err = json.Unmarshal(b, &m)
+	if err != nil {
+		return nil, err
+	}
+
+	t := reflect.TypeOf(v)
+	if reflectV.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+
+	for i := 0; i < t.NumField(); i++ {
+		tf := t.Field(i)
+		isOmit, ok := tf.Tag.Lookup("testomit")
+		fName := tf.Name
+		if jsonTag, ok := tf.Tag.Lookup("json"); ok {
+			fName, _ = paserJsonTag(jsonTag)
+		}
+
+		if !ok {
+			continue
+		}
+
+		if m[fName] != nil {
+			continue
+		}
+
+		if isOmit == "true" {
+			delete(m, fName)
+			continue
+		}
+
+		m[fName] = nil
+	}
+
+	if isIndent(indent...) {
+		return json.MarshalIndent(m, "", "  ")
+	} else {
+		return json.Marshal(m)
+	}
+}
+
+func paserJsonTag(jsonTag string) (jsonName string, isOmitEmpty bool) {
+	splits := strings.Split(jsonTag, ",")
+	if len(splits) == 1 {
+		return splits[0], false
+	}
+	return splits[0], strings.Contains(splits[1], "omitempty")
+}
+
+func isIndent(indent ...bool) bool {
+	_isIndent := false
+	if len(indent) > 0 {
+		_isIndent = indent[0]
+	}
+	return _isIndent
 }
