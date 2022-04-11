@@ -159,6 +159,14 @@ func convertType(from interface{}, to interface{}) (interface{}, error) {
 	return to, nil
 }
 
+func mustConvertType(from interface{}, to interface{}) interface{} {
+	v, err := convertType(from, to)
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
 func mustJsonMarshalForTest(v interface{}, indent ...bool) string {
 	j, err := jsonMarshalForTest(v, indent...)
 	if err != nil {
@@ -167,50 +175,120 @@ func mustJsonMarshalForTest(v interface{}, indent ...bool) string {
 	return string(j)
 }
 
+// Block
+// 	BlockHash
+// 	[]Transactions
+// 		Creates 'testomit:false'
+
 // handle struct field by 'testomit' tag and order json
 func jsonMarshalForTest(v interface{}, indent ...bool) ([]byte, error) {
+
 	fmt.Printf("reflect.ValueOf(v).Kind(): %v\n", reflect.ValueOf(v).Kind())
 
-	reflectV := reflect.ValueOf(v)
+	// reflectV := reflect.ValueOf(v)
 
-	if reflectV.Kind() != reflect.Ptr && reflectV.Kind() != reflect.Struct {
+	// if reflectV.Kind() != reflect.Ptr && reflectV.Kind() != reflect.Struct {
+	// 	return json.Marshal(v)
+	// }
+
+	// if reflectV.Kind() == reflect.Ptr && reflectV.Elem().Kind() != reflect.Struct {
+	// 	fmt.Printf("reflect.ValueOf(v).Elem().Kind(): %v\n", reflectV.Elem().Kind())
+	// 	return json.Marshal(v)
+	// }
+
+	if isSelfOrElemBeStruct(v) {
 		return json.Marshal(v)
 	}
 
-	if reflectV.Kind() == reflect.Ptr && reflectV.Elem().Kind() != reflect.Struct {
-		fmt.Printf("reflect.ValueOf(v).Elem().Kind(): %v\n", reflectV.Elem().Kind())
-		return json.Marshal(v)
+	// b, err := json.Marshal(v)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// m := map[string]interface{}{}
+
+	// err = json.Unmarshal(b, &m)
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	m := mustConvertType(v, map[string]interface{}{}).(map[string]interface{})
+
+	// reflectV := reflect.ValueOf(v)
+	// t := reflect.TypeOf(v)
+	// if reflectV.Kind() == reflect.Ptr {
+	// 	t = t.Elem()
+	// }
+	t := getCoreType(v)
+
+	m = setTestOmit(m, t).(map[string]interface{})
+	// for i := 0; i < t.NumField(); i++ {
+	// 	tf := t.Field(i)
+	// 	isOmit, ok := tf.Tag.Lookup("testomit")
+	// 	fName := tf.Name
+	// 	if jsonTag, ok := tf.Tag.Lookup("json"); ok {
+	// 		fName, _ = paserJsonTag(jsonTag)
+	// 	}
+
+	// 	// m[fName], err = jsonMarshalForTest(m[fName], indent...)
+	// 	// fmt.Printf("m[%v]: %v\n", fName, m[fName])
+	// 	// if err != nil {
+	// 	// 	return nil, err
+	// 	// }
+
+	// 	if !ok {
+	// 		continue
+	// 	}
+
+	// 	if m[fName] != nil {
+	// 		continue
+	// 	}
+
+	// 	if isOmit == "true" {
+	// 		delete(m, fName)
+	// 		continue
+	// 	}
+
+	// 	m[fName] = nil
+	// }
+
+	if isIndent(indent...) {
+		return json.MarshalIndent(m, "", "  ")
+	} else {
+		return json.Marshal(m)
+	}
+}
+
+func setTestOmit(v interface{}, t reflect.Type) interface{} {
+	switch v.(type) {
+	case map[string]interface{}:
+		break
+	case []interface{}:
+		raw := v.([]interface{})
+		for i, vv := range raw {
+			raw[i] = setTestOmit(vv, t.Elem())
+		}
+		return raw
+	default:
+		return v
 	}
 
-	b, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-	m := map[string]interface{}{}
-
-	err = json.Unmarshal(b, &m)
-	if err != nil {
-		return nil, err
-	}
-
-	t := reflect.TypeOf(v)
-	if reflectV.Kind() == reflect.Ptr {
-		t = t.Elem()
-	}
+	m := v.(map[string]interface{})
 
 	for i := 0; i < t.NumField(); i++ {
 		tf := t.Field(i)
-		isOmit, ok := tf.Tag.Lookup("testomit")
 		fName := tf.Name
 		if jsonTag, ok := tf.Tag.Lookup("json"); ok {
-			fName, _ = paserJsonTag(jsonTag)
+			fName, _ = parseJsonTag(jsonTag)
 		}
 
-		if !ok {
+		// 不为空则向下递归, 字段类型为map, array 则递归
+		if m[fName] != nil {
+			m[fName] = setTestOmit(m[fName], tf.Type)
 			continue
 		}
 
-		if m[fName] != nil {
+		isOmit, ok := tf.Tag.Lookup("testomit")
+		if !ok {
 			continue
 		}
 
@@ -221,15 +299,34 @@ func jsonMarshalForTest(v interface{}, indent ...bool) ([]byte, error) {
 
 		m[fName] = nil
 	}
-
-	if isIndent(indent...) {
-		return json.MarshalIndent(m, "", "  ")
-	} else {
-		return json.Marshal(m)
-	}
+	return m
 }
 
-func paserJsonTag(jsonTag string) (jsonName string, isOmitEmpty bool) {
+func isSelfOrElemBeStruct(v interface{}) bool {
+	reflectV := reflect.ValueOf(v)
+
+	if reflectV.Kind() != reflect.Ptr && reflectV.Kind() != reflect.Struct {
+		return true
+	}
+
+	if reflectV.Kind() == reflect.Ptr && reflectV.Elem().Kind() != reflect.Struct {
+		fmt.Printf("reflect.ValueOf(v).Elem().Kind(): %v\n", reflectV.Elem().Kind())
+		return true
+	}
+	return false
+}
+
+// Get type of self or elem type if pointer
+func getCoreType(v interface{}) reflect.Type {
+	reflectV := reflect.ValueOf(v)
+	t := reflect.TypeOf(v)
+	if reflectV.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	return t
+}
+
+func parseJsonTag(jsonTag string) (jsonName string, isOmitEmpty bool) {
 	splits := strings.Split(jsonTag, ",")
 	if len(splits) == 1 {
 		return splits[0], false
