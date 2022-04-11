@@ -185,71 +185,13 @@ func jsonMarshalForTest(v interface{}, indent ...bool) ([]byte, error) {
 
 	fmt.Printf("reflect.ValueOf(v).Kind(): %v\n", reflect.ValueOf(v).Kind())
 
-	// reflectV := reflect.ValueOf(v)
-
-	// if reflectV.Kind() != reflect.Ptr && reflectV.Kind() != reflect.Struct {
-	// 	return json.Marshal(v)
-	// }
-
-	// if reflectV.Kind() == reflect.Ptr && reflectV.Elem().Kind() != reflect.Struct {
-	// 	fmt.Printf("reflect.ValueOf(v).Elem().Kind(): %v\n", reflectV.Elem().Kind())
-	// 	return json.Marshal(v)
-	// }
-
 	if isSelfOrElemBeStruct(v) {
 		return json.Marshal(v)
 	}
 
-	// b, err := json.Marshal(v)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// m := map[string]interface{}{}
-
-	// err = json.Unmarshal(b, &m)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
 	m := mustConvertType(v, map[string]interface{}{}).(map[string]interface{})
-
-	// reflectV := reflect.ValueOf(v)
-	// t := reflect.TypeOf(v)
-	// if reflectV.Kind() == reflect.Ptr {
-	// 	t = t.Elem()
-	// }
 	t := getCoreType(v)
-
 	m = setTestOmit(m, t).(map[string]interface{})
-	// for i := 0; i < t.NumField(); i++ {
-	// 	tf := t.Field(i)
-	// 	isOmit, ok := tf.Tag.Lookup("testomit")
-	// 	fName := tf.Name
-	// 	if jsonTag, ok := tf.Tag.Lookup("json"); ok {
-	// 		fName, _ = paserJsonTag(jsonTag)
-	// 	}
-
-	// 	// m[fName], err = jsonMarshalForTest(m[fName], indent...)
-	// 	// fmt.Printf("m[%v]: %v\n", fName, m[fName])
-	// 	// if err != nil {
-	// 	// 	return nil, err
-	// 	// }
-
-	// 	if !ok {
-	// 		continue
-	// 	}
-
-	// 	if m[fName] != nil {
-	// 		continue
-	// 	}
-
-	// 	if isOmit == "true" {
-	// 		delete(m, fName)
-	// 		continue
-	// 	}
-
-	// 	m[fName] = nil
-	// }
 
 	if isIndent(indent...) {
 		return json.MarshalIndent(m, "", "  ")
