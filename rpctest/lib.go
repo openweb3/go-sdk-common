@@ -20,7 +20,7 @@ import (
 func DoClientTest(t *testing.T, config RpcTestConfig) {
 
 	rpc2Func, rpc2FuncSelector, rpc2FuncResultHandler := config.Rpc2Func, config.Rpc2FuncSelector, config.Rpc2FuncResultHandler
-	ignoreRpc, ignoreExamples, onlyTestRpc := config.IgnoreRpcs, config.IgnoreExamples, config.OnlyTestRpcs
+	ignoreRpc, ignoreExamples, onlyTestRpc, onlyExamples := config.IgnoreRpcs, config.IgnoreExamples, config.OnlyTestRpcs, config.OnlyExamples
 
 	// read json config
 	httpClient := &http.Client{}
@@ -57,6 +57,10 @@ func DoClientTest(t *testing.T, config RpcTestConfig) {
 				continue
 			}
 
+			if len(onlyExamples) > 0 && !onlyExamples[subExamp.Name] {
+				continue
+			}
+
 			var sdkFunc string
 			var params []interface{}
 
@@ -80,6 +84,7 @@ func DoClientTest(t *testing.T, config RpcTestConfig) {
 				switch tmp.(type) {
 				case ConvertParamError:
 					if subExamp.Error != nil {
+						fmt.Printf("convert param err:%v, expect error %v\n", err, subExamp.Error)
 						continue
 					}
 				}
@@ -91,6 +96,7 @@ func DoClientTest(t *testing.T, config RpcTestConfig) {
 			}
 
 			if subExamp.Error != nil || rpcError != nil {
+				// assert.Equal(t, true, subExamp.Error != nil && rpcError != nil)
 				assert.Equal(t, mustJsonMarshalForTest(subExamp.Error), mustJsonMarshalForTest(rpcError))
 				continue
 			}
@@ -123,7 +129,7 @@ func reflectCall(c interface{}, sdkFunc string, params []interface{}) (resp inte
 			in[i+1] = reflect.ValueOf(v)
 		}
 		out := method.Func.Call(in)
-		fmt.Printf("func name: %v, \nparams: %v, \nresp type: %T, respError type: %T, \nresp value: %v, \nrespError value: %v\n",
+		fmt.Printf("---- func name: %v, \nparams: %v, \nresp type: %T, respError type: %T, \nresp value: %v, \nrespError value: %v\n",
 			sdkFunc,
 			mustJsonMarshalForTest(getReflectValuesInterfaces(in[1:])),
 			out[0].Interface(),
@@ -168,7 +174,7 @@ func mustConvertType(from interface{}, to interface{}) interface{} {
 }
 
 func mustJsonMarshalForTest(v interface{}, indent ...bool) string {
-	j, err := jsonMarshalForTest(v, indent...)
+	j, err := JsonMarshalForRpcTest(v, indent...)
 	if err != nil {
 		panic(err)
 	}
@@ -181,26 +187,72 @@ func mustJsonMarshalForTest(v interface{}, indent ...bool) string {
 // 		Creates 'testomit:false'
 
 // handle struct field by 'testomit' tag and order json
-func jsonMarshalForTest(v interface{}, indent ...bool) ([]byte, error) {
+func JsonMarshalForRpcTest(v interface{}, indent ...bool) ([]byte, error) {
 
-	fmt.Printf("reflect.ValueOf(v).Kind(): %v\n", reflect.ValueOf(v).Kind())
+	// fmt.Printf("reflect.ValueOf(v).Kind(): %v\n", reflect.ValueOf(v).Kind())
 
-	if isSelfOrElemBeStruct(v) {
+	if v == nil {
 		return json.Marshal(v)
 	}
 
-	m := mustConvertType(v, map[string]interface{}{}).(map[string]interface{})
-	t := getCoreType(v)
-	m = setTestOmit(m, t).(map[string]interface{})
+	converted := mustConvertType(v, interface{}(nil))
+
+	// if converted result type same with type of v, then return
+	if reflect.TypeOf(converted) == reflect.TypeOf(v) {
+		return json.Marshal(v)
+	}
+
+	converted = setTestOmit(converted, reflect.TypeOf(v))
 
 	if isIndent(indent...) {
-		return json.MarshalIndent(m, "", "  ")
+		return json.MarshalIndent(converted, "", "  ")
 	} else {
-		return json.Marshal(m)
+		return json.Marshal(converted)
 	}
 }
 
+// v must be marshal result of object, t is object core type
 func setTestOmit(v interface{}, t reflect.Type) interface{} {
+	// fmt.Printf("setTestOmit: v: %v, t: %v\n", v, t)
+	if t == nil {
+		panic(fmt.Sprintf("t of %v is nil", v))
+	}
+
+	t = getCoreType(t)
+
+	// 只有结构体或数组才需要遍历
+	if t.Kind() != reflect.Struct && t.Kind() != reflect.Array && t.Kind() != reflect.Slice {
+		return v
+	}
+
+	if method, ok := t.MethodByName("MarshalJSONForRPCTest"); ok {
+		// unmarshal to t
+		strongValue := reflect.New(t).Interface()
+		strongValue, err := convertType(v, strongValue)
+		if err != nil {
+			panic(err)
+		}
+		// call marshalJsonForRpcTest
+		reflectJ := method.Func.Call([]reflect.Value{reflect.ValueOf(strongValue).Elem()})
+		if err != nil {
+			panic(err)
+		}
+
+		j, ok := reflectJ[0].Interface().([]byte)
+		if !ok {
+			panic(errors.Errorf("%v.MarshalJSONForRPCTest() return type is not []byte", t))
+		}
+
+		// fmt.Printf("MarshalJSONForRPCTest result %v\n", string(j))
+
+		var i interface{}
+		err = json.Unmarshal(j, &i)
+		if err != nil {
+			panic(err)
+		}
+		return i
+	}
+
 	switch v.(type) {
 	case map[string]interface{}:
 		break
@@ -223,7 +275,7 @@ func setTestOmit(v interface{}, t reflect.Type) interface{} {
 			fName, _ = parseJsonTag(jsonTag)
 		}
 
-		// 不为空则向下递归, 字段类型为map, array 则递归
+		// recursive fields
 		if m[fName] != nil {
 			m[fName] = setTestOmit(m[fName], tf.Type)
 			continue
@@ -248,22 +300,20 @@ func isSelfOrElemBeStruct(v interface{}) bool {
 	reflectV := reflect.ValueOf(v)
 
 	if reflectV.Kind() != reflect.Ptr && reflectV.Kind() != reflect.Struct {
-		return true
+		return false
 	}
 
 	if reflectV.Kind() == reflect.Ptr && reflectV.Elem().Kind() != reflect.Struct {
 		fmt.Printf("reflect.ValueOf(v).Elem().Kind(): %v\n", reflectV.Elem().Kind())
-		return true
+		return false
 	}
-	return false
+	return true
 }
 
 // Get type of self or elem type if pointer
-func getCoreType(v interface{}) reflect.Type {
-	reflectV := reflect.ValueOf(v)
-	t := reflect.TypeOf(v)
-	if reflectV.Kind() == reflect.Ptr {
-		t = t.Elem()
+func getCoreType(t reflect.Type) reflect.Type {
+	if t.Kind() == reflect.Ptr {
+		return t.Elem()
 	}
 	return t
 }
