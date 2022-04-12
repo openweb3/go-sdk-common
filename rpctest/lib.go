@@ -220,7 +220,7 @@ func setTestOmit(v interface{}, t reflect.Type) interface{} {
 
 	t = getCoreType(t)
 
-	// 只有结构体或数组才需要遍历
+	// only struct/array/slice need be handle
 	if t.Kind() != reflect.Struct && t.Kind() != reflect.Array && t.Kind() != reflect.Slice {
 		return v
 	}
