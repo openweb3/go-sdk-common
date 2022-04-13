@@ -186,14 +186,9 @@ func mustJsonMarshalForTest(v interface{}, indent ...bool) string {
 // 	[]Transactions
 // 		Creates 'testomit:false'
 
-// handle struct field by 'testomit' tag and order json
+// JsonMarshalForRpcTest recursively handle fields of struct or sub-struct of v by 'testomit' tag and order json
 func JsonMarshalForRpcTest(v interface{}, indent ...bool) ([]byte, error) {
-
 	// fmt.Printf("reflect.ValueOf(v).Kind(): %v\n", reflect.ValueOf(v).Kind())
-
-	if v == nil {
-		return json.Marshal(v)
-	}
 
 	converted := mustConvertType(v, interface{}(nil))
 
@@ -202,7 +197,7 @@ func JsonMarshalForRpcTest(v interface{}, indent ...bool) ([]byte, error) {
 		return json.Marshal(v)
 	}
 
-	converted = setTestOmit(converted, reflect.TypeOf(v))
+	converted = setFieldsOmitByTag(converted, reflect.TypeOf(v))
 
 	if isIndent(indent...) {
 		return json.MarshalIndent(converted, "", "  ")
@@ -211,8 +206,9 @@ func JsonMarshalForRpcTest(v interface{}, indent ...bool) ([]byte, error) {
 	}
 }
 
-// v must be marshal result of object, t is object core type
-func setTestOmit(v interface{}, t reflect.Type) interface{} {
+// setFieldsOmitByTag set fields omit by 'testomit' tag
+// v must be marshal result of object, t is real object type
+func setFieldsOmitByTag(v interface{}, t reflect.Type) interface{} {
 	// fmt.Printf("setTestOmit: v: %v, t: %v\n", v, t)
 	if t == nil {
 		panic(fmt.Sprintf("t of %v is nil", v))
@@ -259,7 +255,7 @@ func setTestOmit(v interface{}, t reflect.Type) interface{} {
 	case []interface{}:
 		raw := v.([]interface{})
 		for i, vv := range raw {
-			raw[i] = setTestOmit(vv, t.Elem())
+			raw[i] = setFieldsOmitByTag(vv, t.Elem())
 		}
 		return raw
 	default:
@@ -277,7 +273,7 @@ func setTestOmit(v interface{}, t reflect.Type) interface{} {
 
 		// recursive fields
 		if m[fName] != nil {
-			m[fName] = setTestOmit(m[fName], tf.Type)
+			m[fName] = setFieldsOmitByTag(m[fName], tf.Type)
 			continue
 		}
 

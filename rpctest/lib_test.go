@@ -2,6 +2,7 @@ package rpctest
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 
 	"gotest.tools/assert"
@@ -67,4 +68,13 @@ func TestJsonMarshalForTest(t *testing.T) {
 		fmt.Printf("marshal result: %s", j)
 		assert.Equal(t, item.expect, string(j))
 	}
+}
+
+func TestA(t *testing.T) {
+	fmt.Printf("%v", reflect.TypeOf(nil))
+	v, e := convertType(nil, interface{}(nil))
+	if e != nil {
+		panic(e)
+	}
+	fmt.Printf("%v\n", v)
 }
