@@ -129,7 +129,7 @@ func reflectCall(c interface{}, sdkFunc string, params []interface{}) (resp inte
 			in[i+1] = reflect.ValueOf(v)
 		}
 		out := method.Func.Call(in)
-		fmt.Printf("---- func name: %v, \nparams: %v, \nresp type: %T, respError type: %T, \nresp value: %v, \nrespError value: %v\n",
+		fmt.Printf("\n-- invoke func --\n\tname: %v, \n\tparams: %v, \n\tresp type: %T, \n\trespError type: %T, \n\tresp value: %v, \n\trespError value: %v\n",
 			sdkFunc,
 			mustJsonMarshalForTest(getReflectValuesInterfaces(in[1:])),
 			out[0].Interface(),
