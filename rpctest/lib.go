@@ -13,33 +13,108 @@ import (
 	"gotest.tools/assert"
 )
 
+// // request rpc
+// // compare result
+// //   order both config result and response result by their fields
+// //   json marshal then amd compare
+// func DoClientTest(t *testing.T, config RpcTestConfig) {
+
+// 	rpc2Func, rpc2FuncSelector, rpc2FuncResultHandler := config.Rpc2Func, config.Rpc2FuncSelector, config.Rpc2FuncResultHandler
+// 	ignoreRpc, ignoreExamples, onlyTestRpc, onlyExamples := config.IgnoreRpcs, config.IgnoreExamples, config.OnlyTestRpcs, config.OnlyExamples
+
+// 	m, err := getMockExamples(config.ExamplesUrl)
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+
+// 	for rpcName, subExamps := range m.Examples {
+// 		if ignoreRpc[rpcName] {
+// 			continue
+// 		}
+
+// 		if len(onlyTestRpc) > 0 && !onlyTestRpc[rpcName] {
+// 			continue
+// 		}
+
+// 		for _, subExamp := range subExamps {
+
+// 			if ignoreExamples[subExamp.Name] {
+// 				continue
+// 			}
+
+// 			if len(onlyExamples) > 0 && !onlyExamples[subExamp.Name] {
+// 				continue
+// 			}
+
+// 			var sdkFunc string
+// 			var params []interface{}
+
+// 			if _sdkFunc, ok := rpc2Func[rpcName]; ok {
+// 				sdkFunc, params = _sdkFunc, subExamp.Params
+// 			}
+
+// 			if sdkFuncSelector, ok := rpc2FuncSelector[rpcName]; ok {
+// 				sdkFunc, params = sdkFuncSelector(subExamp.Params)
+// 			}
+
+// 			if sdkFunc == "" {
+// 				t.Fatalf("no sdk func for rpc:%s", rpcName)
+// 			}
+
+// 			fmt.Printf("\n========== example: %v === rpc: %s === params: %s ==========\n", subExamp.Name, rpcName, mustJsonMarshalForTest(params))
+// 			// reflect call sdkFunc
+// 			rpcResult, rpcError, err := reflectCall(config.Client, sdkFunc, params)
+// 			if err != nil {
+// 				var tmp interface{} = err
+// 				switch tmp.(type) {
+// 				case ConvertParamError:
+// 					if subExamp.Error != nil {
+// 						fmt.Printf("convert param err:%v, expect error %v\n", err, subExamp.Error)
+// 						continue
+// 					}
+// 				}
+// 				t.Fatal(err)
+// 			}
+
+// 			if sdkFuncResultHandler, ok := rpc2FuncResultHandler[rpcName]; ok {
+// 				rpcResult = sdkFuncResultHandler(rpcResult)
+// 			}
+
+// 			if subExamp.Error != nil || rpcError != nil {
+// 				// assert.Equal(t, true, subExamp.Error != nil && rpcError != nil)
+// 				assert.Equal(t, mustJsonMarshalForTest(subExamp.Error), mustJsonMarshalForTest(rpcError))
+// 				continue
+// 			}
+// 			assert.Equal(t, mustJsonMarshalForTest(subExamp.Result), mustJsonMarshalForTest(rpcResult))
+// 		}
+// 	}
+// }
+
 // request rpc
 // compare result
 //   order both config result and response result by their fields
 //   json marshal then amd compare
 func DoClientTest(t *testing.T, config RpcTestConfig) {
+	handler := CallExampleResultHandler(func(example RpcExample, rpcResult interface{}, rpcError interface{}) error {
+		if example.Error != nil || rpcError != nil {
+			assert.Equal(t, mustJsonMarshalForTest(example.Error), mustJsonMarshalForTest(rpcError))
+		} else {
+			assert.Equal(t, mustJsonMarshalForTest(example.Result), mustJsonMarshalForTest(rpcResult))
+		}
+		return nil
+	})
+	if err := ExecuteExamples(config, handler); err != nil {
+		t.Fatal(err)
+	}
+}
 
+func ExecuteExamples(config RpcTestConfig, handler CallExampleResultHandler) error {
 	rpc2Func, rpc2FuncSelector, rpc2FuncResultHandler := config.Rpc2Func, config.Rpc2FuncSelector, config.Rpc2FuncResultHandler
 	ignoreRpc, ignoreExamples, onlyTestRpc, onlyExamples := config.IgnoreRpcs, config.IgnoreExamples, config.OnlyTestRpcs, config.OnlyExamples
 
-	// read json config
-	httpClient := &http.Client{}
-	resp, err := httpClient.Get(config.ExamplesUrl)
+	m, err := getMockExamples(config.ExamplesUrl)
 	if err != nil {
-		t.Fatal(err)
-	}
-	source := resp.Body
-	defer resp.Body.Close()
-
-	b, err := ioutil.ReadAll(source)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	m := &MockRPC{}
-	err = json.Unmarshal(b, m)
-	if err != nil {
-		t.Fatal(err)
+		return errors.Wrap(err, "failed to get test examples")
 	}
 
 	for rpcName, subExamps := range m.Examples {
@@ -73,7 +148,8 @@ func DoClientTest(t *testing.T, config RpcTestConfig) {
 			}
 
 			if sdkFunc == "" {
-				t.Fatalf("no sdk func for rpc:%s", rpcName)
+				return errors.New("no sdk func for rpc:" + rpcName)
+				// t.Fatalf("no sdk func for rpc:%s", rpcName)
 			}
 
 			fmt.Printf("\n========== example: %v === rpc: %s === params: %s ==========\n", subExamp.Name, rpcName, mustJsonMarshalForTest(params))
@@ -88,21 +164,46 @@ func DoClientTest(t *testing.T, config RpcTestConfig) {
 						continue
 					}
 				}
-				t.Fatal(err)
+				return errors.Wrapf(err, "failed to call example %v", rpcName)
 			}
 
 			if sdkFuncResultHandler, ok := rpc2FuncResultHandler[rpcName]; ok {
 				rpcReuslt = sdkFuncResultHandler(rpcReuslt)
 			}
 
-			if subExamp.Error != nil || rpcError != nil {
-				// assert.Equal(t, true, subExamp.Error != nil && rpcError != nil)
-				assert.Equal(t, mustJsonMarshalForTest(subExamp.Error), mustJsonMarshalForTest(rpcError))
+			if handler == nil {
 				continue
 			}
-			assert.Equal(t, mustJsonMarshalForTest(subExamp.Result), mustJsonMarshalForTest(rpcReuslt))
+
+			if err := handler(subExamp, rpcReuslt, rpcError); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
+}
+
+func getMockExamples(url string) (*MockRPC, error) {
+	// read json config
+	httpClient := &http.Client{}
+	resp, err := httpClient.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	source := resp.Body
+	defer resp.Body.Close()
+
+	b, err := ioutil.ReadAll(source)
+	if err != nil {
+		return nil, err
+	}
+
+	m := &MockRPC{}
+	err = json.Unmarshal(b, m)
+	if err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 func reflectCall(c interface{}, sdkFunc string, params []interface{}) (resp interface{}, respError interface{}, err error) {

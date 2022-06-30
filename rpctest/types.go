@@ -2,15 +2,18 @@ package rpctest
 
 type ConvertParamError error
 
+type CallExampleResultHandler func(example RpcExample, rpcReulst interface{}, rpcError interface{}) error
+
+type RpcExample struct {
+	Name        string        `json:"name"`
+	Description string        `json:"description"`
+	Params      []interface{} `json:"params"`
+	Result      interface{}   `json:"result"`
+	Error       interface{}   `json:"error"`
+}
 type MockRPC struct {
-	Version  string `json:"version"`
-	Examples map[string][]struct {
-		Name        string        `json:"name"`
-		Description string        `json:"description"`
-		Params      []interface{} `json:"params"`
-		Result      interface{}   `json:"result"`
-		Error       interface{}   `json:"error"`
-	} `json:"examples"`
+	Version  string                  `json:"version"`
+	Examples map[string][]RpcExample `json:"examples"`
 }
 
 type RpcTestConfig struct {
