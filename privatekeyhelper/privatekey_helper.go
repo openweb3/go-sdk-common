@@ -19,7 +19,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/google/uuid"
 	"github.com/mcuadros/go-defaults"
-	hdwallet "github.com/miguelmota/go-ethereum-hdwallet"
+	hdwallet "github.com/openweb3/go-ethereum-hdwallet"
 	"github.com/tyler-smith/go-bip39"
 )
 
