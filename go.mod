@@ -1,8 +1,6 @@
 module github.com/openweb3/go-sdk-common
 
-go 1.21
-
-toolchain go1.22.1
+go 1.25.0
 
 require (
 	github.com/ethereum/go-ethereum v1.14.5
@@ -31,8 +29,8 @@ require (
 	github.com/holiman/uint256 v1.2.4 // indirect
 	github.com/mmcloughlin/addchain v0.4.0 // indirect
 	github.com/supranational/blst v0.3.11 // indirect
-	golang.org/x/crypto v0.22.0 // indirect
+	golang.org/x/crypto v0.52.0 // indirect
 	golang.org/x/sync v0.7.0 // indirect
-	golang.org/x/sys v0.20.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
 )
