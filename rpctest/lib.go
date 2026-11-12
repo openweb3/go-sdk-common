@@ -3,7 +3,7 @@ package rpctest
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"reflect"
 	"strings"
@@ -15,8 +15,9 @@ import (
 
 // request rpc
 // compare result
-//   order both config result and response result by their fields
-//   json marshal then amd compare
+//
+//	order both config result and response result by their fields
+//	json marshal then amd compare
 func DoClientTest(t *testing.T, config RpcTestConfig) {
 	handler := CallExampleResultHandler(func(example RpcExample, rpcResult interface{}, rpcError interface{}) error {
 		if example.Error != nil || rpcError != nil {
@@ -106,6 +107,9 @@ func ExecuteExamples(config RpcTestConfig, handler CallExampleResultHandler) err
 	return nil
 }
 
+// maxExamplesBytes bounds the downloaded JSON before decoding.
+const maxExamplesBytes = 16 * 1024 * 1024
+
 func getMockExamples(url string) (*MockRPC, error) {
 	// read json config
 	httpClient := &http.Client{}
@@ -116,9 +120,13 @@ func getMockExamples(url string) (*MockRPC, error) {
 	source := resp.Body
 	defer resp.Body.Close()
 
-	b, err := ioutil.ReadAll(source)
+	b, err := io.ReadAll(io.LimitReader(source, maxExamplesBytes+1))
 	if err != nil {
 		return nil, err
+	}
+
+	if len(b) > maxExamplesBytes {
+		return nil, errors.Errorf("RPC examples response exceeds %d-byte limit: read at least %d bytes", maxExamplesBytes, len(b))
 	}
 
 	m := &MockRPC{}
@@ -130,18 +138,34 @@ func getMockExamples(url string) (*MockRPC, error) {
 }
 
 func reflectCall(c interface{}, sdkFunc string, params []interface{}) (resp interface{}, respError interface{}, err error) {
-	typeOfClient := reflect.TypeOf(c)
-	if method, ok := typeOfClient.MethodByName(sdkFunc); ok {
-		in := make([]reflect.Value, len(params)+1)
-		in[0] = reflect.ValueOf(c)
+	client := reflect.ValueOf(c)
+	if !client.IsValid() || (client.Kind() == reflect.Ptr && client.IsNil()) {
+		return nil, nil, errors.Errorf("cannot call method %s: client is nil (type %T)", sdkFunc, c)
+	}
+	if method := client.MethodByName(sdkFunc); method.IsValid() {
+		methodType := method.Type()
+		fixed := methodType.NumIn()
+		if methodType.IsVariadic() {
+			fixed--
+			if len(params) < fixed {
+				return nil, nil, errors.Errorf("method %s requires at least %d parameters, got %d", sdkFunc, fixed, len(params))
+			}
+		} else if len(params) != fixed {
+			return nil, nil, errors.Errorf("method %s requires %d parameters, got %d", sdkFunc, fixed, len(params))
+		}
+		if methodType.NumOut() != 2 {
+			return nil, nil, errors.Errorf("method %s requires 2 return values, got %d", sdkFunc, methodType.NumOut())
+		}
+		// The bound method already contains the receiver; no size arithmetic is needed.
+		in := make([]reflect.Value, len(params))
 		// params marshal/unmarshal -> func params type
 		for i, param := range params {
 			// unmarshal params
-			pType := method.Type.In(i + 1)
-
-			// get element type if is variadic function for last param
-			if method.Type.IsVariadic() && i == method.Type.NumIn()-2 {
-				pType = pType.Elem()
+			var pType reflect.Type
+			if methodType.IsVariadic() && i >= fixed {
+				pType = methodType.In(fixed).Elem()
+			} else {
+				pType = methodType.In(i)
 			}
 
 			vPtr := reflect.New(pType).Interface()
@@ -149,13 +173,16 @@ func reflectCall(c interface{}, sdkFunc string, params []interface{}) (resp inte
 			if err != nil {
 				return nil, nil, ConvertParamError(err)
 			}
-			v := reflect.ValueOf(vPtr).Elem().Interface()
-			in[i+1] = reflect.ValueOf(v)
+			if vPtr == nil {
+				in[i] = reflect.Zero(pType)
+			} else {
+				in[i] = reflect.ValueOf(vPtr).Elem()
+			}
 		}
-		out := method.Func.Call(in)
+		out := method.Call(in)
 		fmt.Printf("\n-- invoke func --\n\tname: %v, \n\tparams: %v, \n\tresp type: %T, \n\trespError type: %T, \n\tresp value: %v, \n\trespError value: %v\n",
 			sdkFunc,
-			mustJsonMarshalForTest(getReflectValuesInterfaces(in[1:])),
+			mustJsonMarshalForTest(getReflectValuesInterfaces(in)),
 			out[0].Interface(),
 			out[1].Interface(),
 			mustJsonMarshalForTest(out[0].Interface(), true),
